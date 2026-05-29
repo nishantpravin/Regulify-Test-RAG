@@ -31,10 +31,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!indicator) {
                 indicator = document.createElement('div');
                 indicator.id = 'typing-indicator';
-                indicator.className = 'message ai';
+                indicator.className = 'message-row ai';
                 indicator.innerHTML = `
-                    <div class="typing-indicator" style="display: flex;">
-                        <span></span><span></span><span></span>
+                    <div class="ai-avatar">R</div>
+                    <div class="bubble-wrap">
+                        <div class="bubble">
+                            <div class="typing-indicator" style="display: flex;">
+                                <span></span><span></span><span></span>
+                            </div>
+                        </div>
                     </div>`;
                 chatContainer.appendChild(indicator);
             }
@@ -58,35 +63,41 @@ document.addEventListener('DOMContentLoaded', () => {
         const welcome = document.querySelector('.welcome-message');
         if (welcome) welcome.remove();
 
-        const msgDiv = document.createElement('div');
-        msgDiv.className = `message ${sender}`;
+        const messageRow = document.createElement('div');
+        messageRow.className = `message-row ${sender}`;
+
+        // Add AI Avatar if sender is AI
+        if (sender === 'ai') {
+            const avatar = document.createElement('div');
+            avatar.className = 'ai-avatar';
+            avatar.textContent = 'R'; // R for Regulify
+            messageRow.appendChild(avatar);
+        }
+
+        const bubbleWrap = document.createElement('div');
+        bubbleWrap.className = 'bubble-wrap';
 
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
 
-        if (typeof marked !== 'undefined') {
-            // Pre-process step: Extract math and replace with tokens
+        const time = document.createElement('div');
+        time.className = 'msg-time';
+        const now = new Date();
+        time.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        if (text && typeof marked !== 'undefined') {
             const mathTokens = [];
             let processedText = text;
-
-            // Extract block math: $$...$$ or \[...\]
-            processedText = processedText.replace(/(\$\$|\\\[)([\s\S]*?)(\$\$|\\\])/g, (match, p1, p2, p3) => {
-                mathTokens.push(match);
-                return `%%MATH_TOKEN_${mathTokens.length - 1}%%`;
+            processedText = processedText.replace(/(\$\$|\\\[)([\s\S]*?)(\$\$|\\\])/g, (match) => {
+                mathTokens.push(match); return `%%MATH_TOKEN_${mathTokens.length - 1}%%`;
             });
-
-            // Extract inline math: \(...\)
             processedText = processedText.replace(/(\\\()([\s\S]*?)(\\\))/g, (match) => {
-                mathTokens.push(match);
-                return `%%MATH_TOKEN_${mathTokens.length - 1}%%`;
+                mathTokens.push(match); return `%%MATH_TOKEN_${mathTokens.length - 1}%%`;
             });
 
             const rawHtml = marked.parse(processedText);
             let cleanHtml = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml;
-
-            // Restore math tokens
             mathTokens.forEach((token, index) => {
-                // Ensure no HTML injection replacing back
                 cleanHtml = cleanHtml.replace(`%%MATH_TOKEN_${index}%%`, () => token);
             });
 
@@ -102,16 +113,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     throwOnError: false
                 });
             }
-        } else {
+        } else if (text) {
             bubble.textContent = text;
         }
 
-        msgDiv.appendChild(bubble);
+        bubbleWrap.appendChild(bubble);
 
         if (sources && sources.length > 0) {
             const sourcesContainer = document.createElement('div');
             sourcesContainer.className = 'sources-container';
-
             const label = document.createElement('span');
             label.className = 'sources-label';
             label.textContent = 'Sources:';
@@ -121,14 +131,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const badge = document.createElement('span');
                 badge.className = 'source-badge';
                 badge.textContent = `Page ${src.page}`;
-                // Optionally add a tooltip with the excerpt
                 badge.title = src.excerpt;
                 sourcesContainer.appendChild(badge);
             });
-            msgDiv.appendChild(sourcesContainer);
+            bubbleWrap.appendChild(sourcesContainer);
         }
 
-        chatContainer.appendChild(msgDiv);
+        bubbleWrap.appendChild(time);
+        messageRow.appendChild(bubbleWrap);
+        chatContainer.appendChild(messageRow);
         scrollToBottom();
     };
 
@@ -186,7 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         if (event.type === 'sources') {
                             appendMessage("", "ai", event.sources);
-                            const aiMessages = chatContainer.querySelectorAll('.message.ai');
+                            const aiMessages = chatContainer.querySelectorAll('.message-row.ai');
                             currentAiBubble = aiMessages[aiMessages.length - 1].querySelector('.bubble');
                         } else if (event.type === 'chunk') {
                             accumulatedText += event.text;
