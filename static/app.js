@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const userInput = document.getElementById('user-input');
     const sendBtn = document.getElementById('send-btn');
     const clearBtn = document.getElementById('clear-btn');
-    
+
     // Generate a permanent session ID for this browser tab
     let sessionId = sessionStorage.getItem('sessionId');
     if (!sessionId) {
@@ -47,16 +47,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const msgDiv = document.createElement('div');
         msgDiv.className = `message ${sender}`;
-        
+
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
-        bubble.textContent = text;
+
+        if (typeof marked !== 'undefined') {
+            const rawHtml = marked.parse(text);
+            const cleanHtml = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml;
+            bubble.innerHTML = cleanHtml;
+
+            if (typeof renderMathInElement !== 'undefined') {
+                renderMathInElement(bubble, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '\\[', right: '\\]', display: true },
+                        { left: '$', right: '$', display: false },
+                        { left: '\\(', right: '\\)', display: false }
+                    ],
+                    throwOnError: false
+                });
+            }
+        } else {
+            bubble.textContent = text;
+        }
+
         msgDiv.appendChild(bubble);
 
         if (sources && sources.length > 0) {
             const sourcesContainer = document.createElement('div');
             sourcesContainer.className = 'sources-container';
-            
+
             const label = document.createElement('span');
             label.className = 'sources-label';
             label.textContent = 'Sources:';
@@ -84,9 +104,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         appendMessage(text, 'user');
         userInput.value = '';
-        
+
         setTyping(true);
-        
+
         try {
             const res = await fetch('/query', {
                 method: 'POST',
@@ -96,7 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     session_id: sessionId
                 })
             });
-            
+
             if (!res.ok) {
                 const errorData = await res.json();
                 appendMessage(errorData.detail || 'An error occurred.', 'ai');
@@ -113,13 +133,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     clearBtn.addEventListener('click', async () => {
         if (!confirm('Are you sure you want to clear the chat history?')) return;
-        
+
         try {
             await fetch(`/history/${sessionId}`, { method: 'DELETE' });
         } catch (e) {
             console.error(e);
         }
-        
+
         chatContainer.innerHTML = `
             <div class="welcome-message">
                 <h2>Welcome to Regulify RAG</h2>

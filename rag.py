@@ -1,12 +1,3 @@
-"""
-rag.py
-
-100% free, local RAG pipeline — no API keys needed.
-
-Embeddings: HuggingFace sentence-transformers (all-MiniLM-L6-v2)
-LLM:        Ollama (qwen2.5:1.5b, running locally)
-Memory:     In-memory chat history keyed by session_id.
-"""
 
 import logging
 import os
