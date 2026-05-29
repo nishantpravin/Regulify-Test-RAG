@@ -97,7 +97,7 @@ body {
 .message {
     display: flex;
     flex-direction: column;
-    max-width: 85%;
+    max-width: 100%;
     animation: fadeIn 0.3s ease;
 }
 
@@ -114,6 +114,15 @@ body {
     border-radius: 16px;
     line-height: 1.5;
     font-size: 1rem;
+    overflow-x: auto;
+    overflow-wrap: break-word;
+}
+
+/* Ensure wide math equations scroll horizontally instead of breaking the layout */
+.katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 0.5rem;
 }
 
 .user .bubble {
@@ -123,8 +132,8 @@ body {
 }
 
 .ai .bubble {
-    background: var(--ai-bubble);
-    border: 1px solid var(--glass-border);
+    background: transparent;
+    border: none;
     border-bottom-left-radius: 4px;
 }
 
@@ -218,8 +227,15 @@ body {
 
 /* Animations */
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .typing-indicator {
@@ -242,10 +258,23 @@ body {
     animation: typing 1.4s infinite ease-in-out both;
 }
 
-.typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
-.typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+.typing-indicator span:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.typing-indicator span:nth-child(2) {
+    animation-delay: -0.16s;
+}
 
 @keyframes typing {
-    0%, 80%, 100% { transform: scale(0); }
-    40% { transform: scale(1); }
+
+    0%,
+    80%,
+    100% {
+        transform: scale(0);
+    }
+
+    40% {
+        transform: scale(1);
+    }
 }

@@ -156,6 +156,32 @@ async def query_document(request: QueryRequest) -> QueryResponse:
         sources=[SourceItem(**s) for s in result["sources"]],
     )
 
+from fastapi.responses import StreamingResponse
+import json
+
+@app.post(
+    "/query_stream",
+    summary="Query the document with streaming chunks",
+    status_code=status.HTTP_200_OK,
+)
+async def query_document_stream(request: QueryRequest) -> StreamingResponse:
+    try:
+        pipeline: RAGPipeline = get_pipeline()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(str(exc) + " – restart the server.")
+        )
+
+    def event_stream():
+        try:
+            for event in pipeline.stream_query(question=request.question, session_id=request.session_id):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as exc:
+            logger.exception("Stream failed: %s", exc)
+            yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 @app.delete(
     "/history/{session_id}",

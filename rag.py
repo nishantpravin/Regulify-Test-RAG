@@ -169,6 +169,44 @@ class RAGPipeline:
 
         return {"answer": answer, "sources": final_sources}
 
+    from typing import Generator
+    def stream_query(self, question: str, session_id: str = "default") -> Generator[Dict[str, Any], None, None]:
+        """Answer a question using fully local RAG via streaming chunks."""
+        history: List[BaseMessage] = _chat_histories.setdefault(session_id, [])
+        logger.info("[session=%s] Stream Query: %s (history=%d)", session_id, question, len(history))
+
+        # Retrieve relevant chunks
+        docs: List[Document] = self._retriever.invoke(question)
+        context: str = _format_docs(docs)
+
+        # Build and stream the chain
+        chain = self._prompt | self._llm | StrOutputParser()
+        
+        # Send sources first
+        final_sources = _format_sources(docs)
+        yield {"type": "sources", "sources": final_sources}
+
+        full_answer = ""
+        # stream all chunks one by one
+        for chunk in chain.stream({
+            "input": question,
+            "chat_history": history,
+            "context": context,
+        }):
+            full_answer += chunk
+            yield {"type": "chunk", "text": chunk}
+
+        full_answer = full_answer.strip()
+        if full_answer.startswith("NO_CONTEXT_USED:"):
+            # UI should hide "NO_CONTEXT_USED:" if it can, but streaming has already sent it.
+            # Easiest way is for front end to strip it.
+            full_answer = full_answer.replace("NO_CONTEXT_USED:", "", 1).strip()
+            final_sources = []
+
+        # Update history
+        history.append(HumanMessage(content=question))
+        history.append(AIMessage(content=full_answer))
+
     def clear_history(self, session_id: str = "default") -> None:
         """Clear chat history for a session."""
         _chat_histories.pop(session_id, None)

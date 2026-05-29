@@ -52,8 +52,31 @@ document.addEventListener('DOMContentLoaded', () => {
         bubble.className = 'bubble';
 
         if (typeof marked !== 'undefined') {
-            const rawHtml = marked.parse(text);
-            const cleanHtml = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml;
+            // Pre-process step: Extract math and replace with tokens
+            const mathTokens = [];
+            let processedText = text;
+
+            // Extract block math: $$...$$ or \[...\]
+            processedText = processedText.replace(/(\$\$|\\\[)([\s\S]*?)(\$\$|\\\])/g, (match, p1, p2, p3) => {
+                mathTokens.push(match);
+                return `%%MATH_TOKEN_${mathTokens.length - 1}%%`;
+            });
+
+            // Extract inline math: \(...\)
+            processedText = processedText.replace(/(\\\()([\s\S]*?)(\\\))/g, (match) => {
+                mathTokens.push(match);
+                return `%%MATH_TOKEN_${mathTokens.length - 1}%%`;
+            });
+
+            const rawHtml = marked.parse(processedText);
+            let cleanHtml = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml;
+
+            // Restore math tokens
+            mathTokens.forEach((token, index) => {
+                // Ensure no HTML injection replacing back
+                cleanHtml = cleanHtml.replace(`%%MATH_TOKEN_${index}%%`, () => token);
+            });
+
             bubble.innerHTML = cleanHtml;
 
             if (typeof renderMathInElement !== 'undefined') {
@@ -61,7 +84,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     delimiters: [
                         { left: '$$', right: '$$', display: true },
                         { left: '\\[', right: '\\]', display: true },
-                        { left: '$', right: '$', display: false },
                         { left: '\\(', right: '\\)', display: false }
                     ],
                     throwOnError: false
@@ -108,7 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setTyping(true);
 
         try {
-            const res = await fetch('/query', {
+            const res = await fetch('/query_stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -118,13 +140,84 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (!res.ok) {
-                const errorData = await res.json();
+                const errorData = await res.json().catch(() => ({}));
                 appendMessage(errorData.detail || 'An error occurred.', 'ai');
-            } else {
-                const data = await res.json();
-                appendMessage(data.answer, 'ai', data.sources);
+                setTyping(false);
+                return;
+            }
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let accumulatedText = "";
+            let dataBuffer = "";
+            let currentAiBubble = null;
+
+            setTyping(false); // Remove typing indicator, chunks have started
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                dataBuffer += decoder.decode(value, { stream: true });
+                const lines = dataBuffer.split('\n\n');
+                dataBuffer = lines.pop(); // Keep incomplete chunk
+
+                for (let line of lines) {
+                    if (line.startsWith('data: ')) {
+                        let event;
+                        try {
+                            event = JSON.parse(line.substring(6));
+                        } catch (e) {
+                            continue;
+                        }
+
+                        if (event.type === 'sources') {
+                            appendMessage("", "ai", event.sources);
+                            const aiMessages = chatContainer.querySelectorAll('.message.ai');
+                            currentAiBubble = aiMessages[aiMessages.length - 1].querySelector('.bubble');
+                        } else if (event.type === 'chunk') {
+                            accumulatedText += event.text;
+                            if (currentAiBubble) {
+                                let processedText = accumulatedText;
+                                // Basic Markdown and Math parsing inline for speed
+                                const mathTokens = [];
+                                processedText = processedText.replace(/(\$\$|\\\[)([\s\S]*?)(\$\$|\\\])/g, (match) => {
+                                    mathTokens.push(match); return `%%MATH_TOKEN_${mathTokens.length - 1}%%`;
+                                });
+                                processedText = processedText.replace(/(\\\()([\s\S]*?)(\\\))/g, (match) => {
+                                    mathTokens.push(match); return `%%MATH_TOKEN_${mathTokens.length - 1}%%`;
+                                });
+
+                                const rawHtml = typeof marked !== 'undefined' ? marked.parse(processedText) : processedText;
+                                let cleanHtml = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml;
+
+                                mathTokens.forEach((token, idx) => {
+                                    cleanHtml = cleanHtml.replace(`%%MATH_TOKEN_${idx}%%`, () => token);
+                                });
+
+                                currentAiBubble.innerHTML = cleanHtml;
+
+                                if (typeof renderMathInElement !== 'undefined') {
+                                    renderMathInElement(currentAiBubble, {
+                                        delimiters: [
+                                            { left: '$$', right: '$$', display: true },
+                                            { left: '\\[', right: '\\]', display: true },
+                                            { left: '\\(', right: '\\)', display: false }
+                                        ],
+                                        throwOnError: false
+                                    });
+                                }
+                                scrollToBottom();
+                            }
+                        } else if (event.type === 'error') {
+                            if (!currentAiBubble) appendMessage(event.content, "ai");
+                            else currentAiBubble.innerHTML += "<br><br><b>Error:</b> " + event.content;
+                        }
+                    }
+                }
             }
         } catch (err) {
+            console.error(err);
             appendMessage('Network error. Is the server running?', 'ai');
         } finally {
             setTyping(false);
