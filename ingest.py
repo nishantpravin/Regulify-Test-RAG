@@ -87,14 +87,15 @@ def load_pdf(pdf_path: str) -> List[Document]:
     return documents
 
 
-def chunk_documents(documents: List[Document]) -> List[Document]:
-    """Split documents into overlapping chunks while preserving metadata.
+def chunk_documents(documents: List[Document], doc_id: str = "default") -> List[Document]:
+    """Split documents into overlapping chunks while preserving metadata and adding doc_id.
 
     Args:
         documents: List of raw page Documents.
+        doc_id: Unique identifier for this document.
 
     Returns:
-        List of smaller chunk Documents, each retaining page/source metadata.
+        List of smaller chunk Documents, each retaining page/source metadata and doc_id.
     """
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
@@ -103,12 +104,18 @@ def chunk_documents(documents: List[Document]) -> List[Document]:
         add_start_index=True,
     )
     chunks = splitter.split_documents(documents)
+    
+    # Add doc_id to metadata for filtering
+    for chunk in chunks:
+        chunk.metadata["doc_id"] = doc_id
+        
     logger.info(
-        "Split %d page(s) into %d chunk(s) (size=%d, overlap=%d)",
+        "Split %d page(s) into %d chunk(s) (size=%d, overlap=%d) for doc_id: %s",
         len(documents),
         len(chunks),
         CHUNK_SIZE,
         CHUNK_OVERLAP,
+        doc_id
     )
     return chunks
 
@@ -142,23 +149,30 @@ def build_vectorstore(
     return vectorstore
 
 
-def rebuild_vectorstore(pdf_path: str, persist_directory: str = CHROMA_DB_DIR) -> Chroma:
-    """Delete and fully rebuild the ChromaDB vector store from the given PDF.
-
-    Args:
-        pdf_path: Path to the source PDF.
-        persist_directory: Directory to clear and rebuild.
-
-    Returns:
-        Freshly built Chroma vector store.
-    """
+def rebuild_vectorstore(pdf_path: str, persist_directory: str = CHROMA_DB_DIR, doc_id: str = "default") -> Chroma:
+    """Delete and fully rebuild the ChromaDB vector store from the given PDF."""
     if Path(persist_directory).exists():
         logger.warning("Removing existing vector store at '%s' …", persist_directory)
         shutil.rmtree(persist_directory)
 
     documents = load_pdf(pdf_path)
-    chunks = chunk_documents(documents)
+    chunks = chunk_documents(documents, doc_id)
     return build_vectorstore(chunks, persist_directory)
+
+
+def process_pdf(pdf_path: str, doc_id: str, persist_directory: str = CHROMA_DB_DIR) -> None:
+    """Load, chunk, and ADD a PDF to the vector store without deleting the whole store."""
+    documents = load_pdf(pdf_path)
+    chunks = chunk_documents(documents, doc_id)
+    
+    embeddings = get_embeddings()
+    # Loading existing or creating new
+    vectorstore = Chroma(
+        persist_directory=persist_directory,
+        embedding_function=embeddings
+    )
+    vectorstore.add_documents(chunks)
+    logger.info("Added document %s to vector store at %s", doc_id, persist_directory)
 
 
 # ---------------------------------------------------------------------------

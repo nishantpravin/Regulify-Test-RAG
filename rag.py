@@ -1,8 +1,9 @@
 
 import logging
 import os
+import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Generator
 
 from dotenv import load_dotenv
 from langchain_community.vectorstores import Chroma
@@ -33,9 +34,7 @@ EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 TOP_K: int = int(os.getenv("TOP_K", "5"))
-
-# In-memory session store
-_chat_histories: Dict[str, List[BaseMessage]] = {}
+DB_PATH: str = "regulify.db"
 
 
 # ---------------------------------------------------------------------------
@@ -149,17 +148,41 @@ class RAGPipeline:
             ("human", "{input}"),
         ])
 
+    def _get_db_history(self, session_id: str) -> List[BaseMessage]:
+        """Fetch history from SQLite and convert to LangChain messages."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT role, content FROM messages WHERE session_id = ? ORDER BY timestamp ASC",
+            (session_id,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        history = []
+        for role, content in rows:
+            if role == "user":
+                history.append(HumanMessage(content=content))
+            else:
+                history.append(AIMessage(content=content))
+        return history
+
+    def _save_message(self, session_id: str, role: str, content: str):
+        """Save a message and ensure the session exists."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        # Basic auto-session creation
+        cursor.execute("INSERT OR IGNORE INTO sessions (id, title) VALUES (?, ?)", (session_id, "New Chat"))
+        cursor.execute(
+            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+            (session_id, role, content)
+        )
+        conn.commit()
+        conn.close()
+
     def query(self, question: str, session_id: str = "default") -> Dict[str, Any]:
-        """Answer a question using fully local RAG, retaining conversation context.
-
-        Args:
-            question:   The user's question.
-            session_id: Conversation session identifier.
-
-        Returns:
-            Dict with ``answer`` (str) and ``sources`` (list of dicts).
-        """
-        history: List[BaseMessage] = _chat_histories.setdefault(session_id, [])
+        """Answer a question using fully local RAG, retaining conversation context."""
+        history = self._get_db_history(session_id)
         logger.info("[session=%s] Query: %s (history=%d)", session_id, question, len(history))
 
         # Conversational bypass: skip distance filter for greetings/chit-chat
@@ -169,19 +192,31 @@ class RAGPipeline:
             answer = chain.invoke({"input": question, "chat_history": history, "context": ""}).strip()
             if answer.startswith("NO_CONTEXT_USED:"):
                 answer = answer.replace("NO_CONTEXT_USED:", "", 1).strip()
-            history.append(HumanMessage(content=question))
-            history.append(AIMessage(content=answer))
+            self._save_message(session_id, "user", question)
+            self._save_message(session_id, "ai", answer)
             return {"answer": answer, "sources": []}
 
-        # Retrieve relevant chunks with score (L2 distance)
-        retrieved = self._vectorstore.similarity_search_with_score(question, k=TOP_K)
+        # Fetch associated doc_id for this session
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT doc_id FROM sessions WHERE id = ?", (session_id,))
+        row = cursor.fetchone()
+        conn.close()
+        doc_id = row[0] if row and row[0] else "default"
+
+        # Retrieve relevant chunks with score (L2 distance), filtered by doc_id
+        retrieved = self._vectorstore.similarity_search_with_score(
+            question, 
+            k=TOP_K,
+            filter={"doc_id": doc_id}
+        )
         
         # Pre-retrieval filtering: reject ONLY genuine gibberish (very high distance threshold)
         if not retrieved or retrieved[0][1] > 1.6:
             logger.info("Gibberish/no-match detected! Min distance: %f", retrieved[0][1] if retrieved else -1)
             fallback = "I didn't quite catch that! Could you rephrase? I can answer questions about the Regulify document, or general knowledge questions too."
-            history.append(HumanMessage(content=question))
-            history.append(AIMessage(content=fallback))
+            self._save_message(session_id, "user", question)
+            self._save_message(session_id, "ai", fallback)
             return {"answer": fallback, "sources": []}
 
         docs: List[Document] = [doc for doc, _ in retrieved]
@@ -204,15 +239,17 @@ class RAGPipeline:
             final_sources = _format_sources(docs)
 
         # Update history
-        history.append(HumanMessage(content=question))
-        history.append(AIMessage(content=answer))
+        self._save_message(session_id, "user", question)
+        self._save_message(session_id, "ai", answer)
+
+        # Trigger title generation if it's still default
+        self._maybe_generate_title(session_id)
 
         return {"answer": answer, "sources": final_sources}
 
-    from typing import Generator
     def stream_query(self, question: str, session_id: str = "default") -> Generator[Dict[str, Any], None, None]:
         """Answer a question using fully local RAG via streaming chunks."""
-        history: List[BaseMessage] = _chat_histories.setdefault(session_id, [])
+        history = self._get_db_history(session_id)
         logger.info("[session=%s] Stream Query: %s (history=%d)", session_id, question, len(history))
 
         # Conversational bypass: skip distance filter for greetings/chit-chat
@@ -229,20 +266,32 @@ class RAGPipeline:
                     text_to_yield = ""
                 yield {"type": "chunk", "text": text_to_yield}
             full_answer = full_answer.replace("NO_CONTEXT_USED:", "", 1).strip()
-            history.append(HumanMessage(content=question))
-            history.append(AIMessage(content=full_answer))
+            self._save_message(session_id, "user", question)
+            self._save_message(session_id, "ai", full_answer)
             return
 
-        # Retrieve relevant chunks with score
-        retrieved = self._vectorstore.similarity_search_with_score(question, k=TOP_K)
+        # Fetch associated doc_id for this session
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT doc_id FROM sessions WHERE id = ?", (session_id,))
+        row = cursor.fetchone()
+        conn.close()
+        doc_id = row[0] if row and row[0] else "default"
+
+        # Retrieve relevant chunks with score, filtered by doc_id
+        retrieved = self._vectorstore.similarity_search_with_score(
+            question, 
+            k=TOP_K,
+            filter={"doc_id": doc_id}
+        )
 
         if not retrieved or retrieved[0][1] > 1.6:
             logger.info("Gibberish/no-match detected! Min distance: %f", retrieved[0][1] if retrieved else -1)
             fallback = "I didn't quite catch that! Could you rephrase? I can answer questions about the Regulify document, or general knowledge questions too."
             yield {"type": "sources", "sources": []}
             yield {"type": "chunk", "text": fallback}
-            history.append(HumanMessage(content=question))
-            history.append(AIMessage(content=fallback))
+            self._save_message(session_id, "user", question)
+            self._save_message(session_id, "ai", fallback)
             return
 
         docs: List[Document] = [doc for doc, _ in retrieved]
@@ -273,17 +322,25 @@ class RAGPipeline:
             final_sources = []
 
         # Update history
-        history.append(HumanMessage(content=question))
-        history.append(AIMessage(content=full_answer))
+        self._save_message(session_id, "user", question)
+        self._save_message(session_id, "ai", full_answer)
+        
+        # Trigger title generation
+        self._maybe_generate_title(session_id)
 
     def clear_history(self, session_id: str = "default") -> None:
-        """Clear chat history for a session."""
-        _chat_histories.pop(session_id, None)
+        """Clear chat history for a session in SQLite."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        conn.commit()
+        conn.close()
         logger.info("History cleared for session '%s'.", session_id)
 
     def get_history(self, session_id: str = "default") -> List[Dict[str, str]]:
         """Return the chat history as a list of dictionaries for the UI."""
-        history = _chat_histories.get(session_id, [])
+        history = self._get_db_history(session_id)
         formatted = []
         for msg in history:
             sender = "user" if isinstance(msg, HumanMessage) else "ai"
@@ -292,8 +349,74 @@ class RAGPipeline:
 
     @staticmethod
     def get_session_ids() -> List[str]:
-        """Return all active session IDs."""
-        return list(_chat_histories.keys())
+        """Return all session IDs from SQLite."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM sessions")
+        rows = cursor.fetchall()
+        conn.close()
+        return [row[0] for row in rows]
+
+    @staticmethod
+    def get_available_documents() -> List[Dict[str, str]]:
+        """Return list of all ingested documents."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, filename FROM documents")
+        rows = cursor.fetchall()
+        conn.close()
+        return [{"id": row[0], "filename": row[1]} for row in rows]
+
+    def set_session_doc(self, session_id: str, doc_id: str):
+        """Associate a session with a specific document."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO sessions (id, title, doc_id) VALUES (?, ?, ?)", (session_id, "New Chat", doc_id))
+        cursor.execute("UPDATE sessions SET doc_id = ? WHERE id = ?", (doc_id, session_id))
+        conn.commit()
+        conn.close()
+
+    def _maybe_generate_title(self, session_id: str):
+        """Check if session title needs updating and trigger generation."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT title FROM sessions WHERE id = ?", (session_id,))
+        row = cursor.fetchone()
+        if not row or row[0] != "New Chat":
+            conn.close()
+            return
+        
+        # Fetch the first couple messages to summarize
+        cursor.execute("SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 2", (session_id,))
+        msgs = cursor.fetchall()
+        conn.close()
+
+        if len(msgs) >= 2:
+            try:
+                # Prompt the LLM for a title
+                text_to_summarize = f"User: {msgs[0][0]}\nAI: {msgs[1][0]}"
+                title_prompt = f"Create a very short (max 4 words) title for this conversation:\n\n{text_to_summarize}\n\nTitle:"
+                title_response = self._llm.invoke(title_prompt).content.strip().strip('"')
+                
+                # Update DB
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute("UPDATE sessions SET title = ? WHERE id = ?", (title_response, session_id))
+                conn.commit()
+                conn.close()
+                logger.info("Generated title for session %s: %s", session_id, title_response)
+            except Exception as e:
+                logger.error("Failed to generate title: %s", e)
+
+    @staticmethod
+    def get_sessions() -> List[Dict[str, str]]:
+        """Return all sessions with IDs and Titles from SQLite."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title FROM sessions ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        return [{"id": row[0], "title": row[1]} for row in rows]
 
 
 # Module-level singleton

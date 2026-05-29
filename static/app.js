@@ -7,6 +7,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const themeToggleBtn = document.getElementById('theme-toggle');
     const sessionList = document.getElementById('session-list');
     const newChatBtn = document.getElementById('new-chat-btn');
+    const documentList = document.getElementById('document-list');
+    const addDocBtn = document.getElementById('add-doc-btn');
+    const docUploadInput = document.getElementById('doc-upload-input');
+
+    let currentDocId = localStorage.getItem('currentDocId') || null;
 
     // Theme Management
     let currentTheme = localStorage.getItem('theme') || 'dark';
@@ -141,6 +146,16 @@ document.addEventListener('DOMContentLoaded', () => {
         messageRow.appendChild(bubbleWrap);
         chatContainer.appendChild(messageRow);
         scrollToBottom();
+
+        // Add event listeners to source badges
+        const badges = messageRow.querySelectorAll('.source-badge');
+        badges.forEach(badge => {
+            badge.style.cursor = 'pointer';
+            badge.addEventListener('click', () => {
+                const pageNum = parseInt(badge.textContent.replace('Page ', ''));
+                if (currentDocId) openPDFViewer(currentDocId, pageNum);
+            });
+        });
     };
 
     chatForm.addEventListener('submit', async (e) => {
@@ -240,14 +255,40 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             }
-        } catch (err) {
-            console.error(err);
-            appendMessage('Network error. Is the server running?', 'ai');
         } finally {
             setTyping(false);
-            if (typeof loadSessions === 'function') loadSessions();
+            loadSessions();
         }
     });
+
+    const exportBtn = document.getElementById('export-btn');
+    exportBtn.addEventListener('click', () => exportChatToPDF());
+
+    const exportChatToPDF = () => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        let y = 10;
+        doc.setFontSize(20);
+        doc.text("Regulify Chat Export", 10, y);
+        y += 15;
+        doc.setFontSize(12);
+
+        const rows = chatContainer.querySelectorAll('.message-row');
+        rows.forEach(row => {
+            const role = row.classList.contains('user') ? 'User' : 'AI';
+            const text = row.querySelector('.bubble').innerText;
+            const splitText = doc.splitTextToSize(`${role}: ${text}`, 180);
+
+            if (y + (splitText.length * 7) > 280) {
+                doc.addPage();
+                y = 10;
+            }
+            doc.text(splitText, 10, y);
+            y += (splitText.length * 7) + 5;
+        });
+
+        doc.save(`Regulify_Chat_${sessionId}.pdf`);
+    };
 
     clearBtn.addEventListener('click', async () => {
         if (!confirm('Are you sure you want to clear the chat history?')) return;
@@ -267,17 +308,80 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
             sessionList.innerHTML = '';
 
-            // Display most recent (bottom) first in sidebar
-            [...data.sessions].reverse().forEach(sid => {
+            [...data.sessions].reverse().forEach(session => {
                 const item = document.createElement('div');
                 item.className = 'session-item';
-                if (sid === sessionId) item.classList.add('active');
-                item.textContent = sid;
-                item.addEventListener('click', () => loadHistory(sid));
+                if (session.id === sessionId) item.classList.add('active');
+                item.textContent = session.title;
+                item.addEventListener('click', () => loadHistory(session.id));
                 sessionList.appendChild(item);
             });
         } catch (e) { console.error('Sessions fetch error:', e); }
     };
+
+    const loadDocuments = async () => {
+        try {
+            const res = await fetch('/documents');
+            const docs = await res.json();
+            documentList.innerHTML = '';
+
+            if (docs.length === 0) {
+                documentList.innerHTML = '<div class="empty-state">No documents uploaded</div>';
+            }
+
+            docs.forEach(doc => {
+                const item = document.createElement('div');
+                item.className = 'doc-item';
+                if (doc.id === currentDocId) item.classList.add('active');
+                item.innerHTML = `
+                    <span class="doc-icon">📄</span>
+                    <span class="doc-name">${doc.filename}</span>
+                `;
+                item.addEventListener('click', () => selectDocument(doc.id));
+                documentList.appendChild(item);
+            });
+
+            if (!currentDocId && docs.length > 0) {
+                selectDocument(docs[0].id);
+            }
+        } catch (e) { console.error('Docs fetch error:', e); }
+    };
+
+    const selectDocument = (docId) => {
+        currentDocId = docId;
+        localStorage.setItem('currentDocId', docId);
+        loadDocuments(); // Update active class
+    };
+
+    addDocBtn.addEventListener('click', () => docUploadInput.click());
+
+    docUploadInput.addEventListener('change', async () => {
+        const file = docUploadInput.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        setTyping(true); // Reuse typing logic for "Processing..."
+        try {
+            const res = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+            if (res.ok) {
+                const data = await res.json();
+                selectDocument(data.doc_id);
+                loadDocuments();
+            } else {
+                alert('Upload failed');
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setTyping(false);
+            docUploadInput.value = '';
+        }
+    });
 
     const loadHistory = async (sid) => {
         sessionId = sid;
@@ -306,12 +410,111 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) { console.error('History fetch error:', e); }
     };
 
-    newChatBtn.addEventListener('click', () => {
+    newChatBtn.addEventListener('click', async () => {
         sessionId = 'session_' + Math.random().toString(36).substring(2, 10);
         sessionStorage.setItem('sessionId', sessionId);
+
+        // Link new session to current document
+        if (currentDocId) {
+            await fetch('/session/doc', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId, doc_id: currentDocId })
+            });
+        }
         loadHistory(sessionId);
     });
 
+    // Voice Interaction (STT)
+    const micBtn = document.createElement('button');
+    micBtn.type = 'button';
+    micBtn.id = 'mic-btn';
+    micBtn.className = 'icon-btn mic-btn';
+    micBtn.title = 'Voice to Text';
+    micBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <line x1="12" y1="19" x2="12" y2="23"></line>
+            <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>`;
+    chatForm.insertBefore(micBtn, sendBtn);
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+
+        micBtn.addEventListener('click', () => {
+            if (micBtn.classList.contains('recording')) {
+                recognition.stop();
+            } else {
+                recognition.start();
+                micBtn.classList.add('recording');
+            }
+        });
+
+        recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            userInput.value += (userInput.value ? ' ' : '') + transcript;
+            micBtn.classList.remove('recording');
+            userInput.focus();
+        };
+
+        recognition.onerror = () => micBtn.classList.remove('recording');
+        recognition.onend = () => micBtn.classList.remove('recording');
+    } else {
+        micBtn.style.display = 'none';
+    }
+
+    const viewerContainer = document.getElementById('pdf-viewer-container');
+    const closeViewerBtn = document.getElementById('close-viewer');
+    const pdfFilenameLabel = document.getElementById('pdf-filename');
+    const renderArea = document.getElementById('pdf-render-area');
+
+    let pdfDoc = null;
+
+    closeViewerBtn.addEventListener('click', () => {
+        viewerContainer.classList.add('hidden');
+    });
+
+    const openPDFViewer = async (docId, targetPage = 1) => {
+        viewerContainer.classList.remove('hidden');
+        renderArea.innerHTML = '<div class="loading">Loading PDF...</div>';
+
+        try {
+            const url = `/pdf/${docId}`;
+            const loadingTask = pdfjsLib.getDocument(url);
+            pdfDoc = await loadingTask.promise;
+            renderArea.innerHTML = '';
+
+            for (let i = 1; i <= pdfDoc.numPages; i++) {
+                const canvas = document.createElement('canvas');
+                canvas.id = `page-${i}`;
+                canvas.className = 'pdf-page-canvas';
+                renderArea.appendChild(canvas);
+
+                const page = await pdfDoc.getPage(i);
+                const viewport = page.getViewport({ scale: 1.5 });
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+
+                await page.render({ canvasContext: context, viewport: viewport }).promise;
+            }
+
+            // Scroll to target page
+            const targetEl = document.getElementById(`page-${targetPage}`);
+            if (targetEl) targetEl.scrollIntoView({ behavior: 'smooth' });
+
+        } catch (e) {
+            console.error('PDF error:', e);
+            renderArea.innerHTML = '<div class="error">Failed to load PDF.</div>';
+        }
+    };
+
     // Initialize App
+    loadDocuments();
     loadHistory(sessionId);
 });

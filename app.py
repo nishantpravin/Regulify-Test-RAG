@@ -16,12 +16,17 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from rag import get_pipeline, RAGPipeline
+from rag import get_pipeline, RAGPipeline, DB_PATH
+from ingest import process_pdf
+import uuid
+import os
+import sqlite3
+import shutil
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -209,7 +214,7 @@ async def clear_history(session_id: str) -> JSONResponse:
 async def list_sessions() -> JSONResponse:
     try:
         pipeline: RAGPipeline = get_pipeline()
-        return JSONResponse(content={"sessions": pipeline.get_session_ids()})
+        return JSONResponse(content={"sessions": pipeline.get_sessions()})
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -225,6 +230,73 @@ async def get_history(session_id: str) -> JSONResponse:
         return JSONResponse(content={"history": history})
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+
+@app.get("/documents", summary="List all ingested documents")
+async def list_documents():
+    try:
+        pipeline: RAGPipeline = get_pipeline()
+        return pipeline.get_available_documents()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/upload", summary="Upload and ingest a new PDF")
+async def upload_document(file: UploadFile = File(...)):
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    
+    doc_id = str(uuid.uuid4())[:8]
+    upload_dir = "data"
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, f"{doc_id}_{file.filename}")
+    
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        pipeline: RAGPipeline = get_pipeline()
+        # Ingest into ChromaDB
+        pipeline.process_pdf(file_path, doc_id)
+        
+        # Register in SQLite
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO documents (id, filename) VALUES (?, ?)", (doc_id, file.filename))
+        conn.commit()
+        conn.close()
+        
+        return {"doc_id": doc_id, "filename": file.filename}
+    except Exception as e:
+        logger.exception("Upload failed")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/pdf/{doc_id}", summary="Serve a specific PDF document")
+async def serve_pdf(doc_id: str):
+    try:
+        upload_dir = "data"
+        files = [f for f in os.listdir(upload_dir) if f.startswith(doc_id)]
+        if not files:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        file_path = os.path.join(upload_dir, files[0])
+        return FileResponse(file_path, media_type="application/pdf")
+    except Exception as e:
+        if isinstance(e, HTTPException): raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+class SessionDocRequest(BaseModel):
+    session_id: str
+    doc_id: str
+
+@app.post("/session/doc", summary="Link a session to a document")
+async def link_session_doc(req: SessionDocRequest):
+    try:
+        pipeline: RAGPipeline = get_pipeline()
+        pipeline.set_session_doc(req.session_id, req.doc_id)
+        return {"message": "Linked successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get(
     "/health",

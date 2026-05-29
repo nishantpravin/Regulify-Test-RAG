@@ -21,6 +21,17 @@
             <div id="session-list" class="session-list">
                 <!-- Session items magically appear here via JS -->
             </div>
+
+            <div class="sidebar-divider"></div>
+
+            <div class="sidebar-header">
+                <h2>Documents</h2>
+                <button id="add-doc-btn" class="icon-btn" title="Upload Document">+</button>
+                <input type="file" id="doc-upload-input" accept=".pdf" style="display: none;">
+            </div>
+            <div id="document-list" class="document-list">
+                <!-- Loaded documents appear here -->
+            </div>
         </aside>
 
         <!-- Main Chat Panel -->
@@ -29,16 +40,27 @@
                 <h1>Regulify</h1>
                 <div class="header-actions">
                     <button id="theme-toggle" class="secondary-btn" title="Toggle Theme">◑ Theme</button>
+                    <button id="export-btn" class="secondary-btn" title="Export Chat to PDF">Export</button>
                     <button id="clear-btn" class="secondary-btn" title="Clear Current Chat">Clear</button>
                 </div>
             </header>
 
-            <main id="chat-container">
-                <div class="welcome-message">
-                    <h2>Welcome to Regulify RAG</h2>
-                    <p>Select a past chat from the left, or start typing to create a new one!</p>
+            <div id="main-content-split" class="content-split">
+                <main id="chat-container">
+                    <div class="welcome-message">
+                        <h2>Welcome to Regulify RAG</h2>
+                        <p>Select a past chat from the left, or start typing to create a new one!</p>
+                    </div>
+                </main>
+
+                <div id="pdf-viewer-container" class="pdf-viewer hidden glass-panel">
+                    <div class="viewer-controls">
+                        <span id="pdf-filename">Document.pdf</span>
+                        <button id="close-viewer" class="icon-btn">×</button>
+                    </div>
+                    <div id="pdf-render-area"></div>
                 </div>
-            </main>
+            </div>
 
             <footer class="input-area glass-footer">
                 <form id="chat-form">
@@ -60,6 +82,9 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+    <!-- PDF.js & jsPDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <script src="/static/app.js"></script>
 </body>
