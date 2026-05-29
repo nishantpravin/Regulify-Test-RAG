@@ -651,6 +651,47 @@ body.light-theme .message-row.ai .bubble::after {
     }
 }
 
+.session-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    border-radius: 8px;
+    margin-bottom: 0.25rem;
+}
+
+.session-title {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: 0.5rem;
+}
+
+.delete-session {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.2rem;
+    padding: 0 0.5rem;
+    opacity: 0;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.session-item:hover .delete-session {
+    opacity: 0.6;
+}
+
+.delete-session:hover {
+    color: #ef4444 !important;
+    opacity: 1 !important;
+    background: rgba(239, 68, 68, 0.1);
+}
+
 /* Enhanced User Input Glow */
 #user-input:focus {
     border-color: #818cf8;

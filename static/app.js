@@ -290,6 +290,18 @@ document.addEventListener('DOMContentLoaded', () => {
         doc.save(`Regulify_Chat_${sessionId}.pdf`);
     };
 
+    const deleteSession = async (sid) => {
+        if (!confirm('Are you sure you want to delete this session?')) return;
+        try {
+            await fetch(`/sessions/${sid}`, { method: 'DELETE' });
+            if (sessionId === sid) {
+                sessionId = `session_${Math.random().toString(36).substr(2, 9)}`;
+                chatContainer.innerHTML = '';
+            }
+            loadSessions();
+        } catch (e) { console.error('Delete session error:', e); }
+    };
+
     clearBtn.addEventListener('click', async () => {
         if (!confirm('Are you sure you want to clear the chat history?')) return;
 
@@ -312,8 +324,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 const item = document.createElement('div');
                 item.className = 'session-item';
                 if (session.id === sessionId) item.classList.add('active');
-                item.textContent = session.title;
-                item.addEventListener('click', () => loadHistory(session.id));
+
+                const title = document.createElement('span');
+                title.className = 'session-title';
+                title.textContent = session.title;
+                title.addEventListener('click', () => loadHistory(session.id));
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'delete-session';
+                delBtn.innerHTML = '×';
+                delBtn.title = 'Delete Session';
+                delBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteSession(session.id);
+                });
+
+                item.appendChild(title);
+                item.appendChild(delBtn);
                 sessionList.appendChild(item);
             });
         } catch (e) { console.error('Sessions fetch error:', e); }
@@ -394,20 +421,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
 
             chatContainer.innerHTML = '';
-            if (!data.history || data.history.length === 0) {
-                chatContainer.innerHTML = `
-                    <div class="welcome-message">
-                        <h2>Welcome to Regulify RAG</h2>
-                        <p>Select a past chat from the left, or start typing to create a new one!</p>
-                    </div>
-                `;
-                return;
+            if (data.history && data.history.length > 0) {
+                data.history.forEach(msg => appendMessage(msg.text, msg.sender));
             }
-
-            data.history.forEach(msg => {
-                appendMessage(msg.text, msg.sender);
-            });
-        } catch (e) { console.error('History fetch error:', e); }
+            loadSessions(); // Update sidebar active state
+        } catch (e) { console.error('History load error:', e); }
     };
 
     newChatBtn.addEventListener('click', async () => {

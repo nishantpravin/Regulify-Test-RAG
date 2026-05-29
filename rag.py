@@ -419,6 +419,17 @@ class RAGPipeline:
         return [{"id": row[0], "title": row[1]} for row in rows]
 
 
+    def delete_session(self, session_id: str):
+        """Delete a session and its history from SQLite."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        conn.commit()
+        conn.close()
+        logger.info("Deleted session %s", session_id)
+
+
 # Module-level singleton
 _pipeline_instance: Optional[RAGPipeline] = None
 

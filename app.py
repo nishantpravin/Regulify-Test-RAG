@@ -208,8 +208,6 @@ async def clear_history(session_id: str) -> JSONResponse:
 
 @app.get(
     "/sessions",
-    summary="List all active session IDs",
-    status_code=status.HTTP_200_OK,
 )
 async def list_sessions() -> JSONResponse:
     try:
@@ -217,6 +215,15 @@ async def list_sessions() -> JSONResponse:
         return JSONResponse(content={"sessions": pipeline.get_sessions()})
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+
+@app.delete("/sessions/{session_id}", summary="Delete a specific session")
+async def delete_session(session_id: str):
+    try:
+        pipeline: RAGPipeline = get_pipeline()
+        pipeline.delete_session(session_id)
+        return {"message": "Session deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get(
     "/history/{session_id}",
