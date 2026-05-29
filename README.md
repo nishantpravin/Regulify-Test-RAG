@@ -1,4 +1,4 @@
-# Document RAG Application (Free & Local)
+# Document RAG Application
 
 A production-ready Retrieval-Augmented Generation (RAG) application using FastAPI, LangChain, ChromaDB, HuggingFace embeddings, and Ollama. **This implementation runs 100% locally and free, with zero API costs.**
 
