@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,40 +9,59 @@
     <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
+
 <body>
     <div class="app-container">
-        <header class="glass-header">
-            <h1>Regulify</h1>
-            <div class="header-actions">
-                <button id="clear-btn" class="secondary-btn">Clear Chat</button>
+        <!-- New Sidebar -->
+        <aside id="sidebar" class="sidebar glass-panel">
+            <div class="sidebar-header">
+                <h2>Chat History</h2>
+                <button id="new-chat-btn" class="icon-btn" title="New Chat">+</button>
             </div>
-        </header>
-
-        <main id="chat-container">
-            <div class="welcome-message">
-                <h2>Welcome to Regulify RAG</h2>
-                <p>Ask a question based on your document.</p>
+            <div id="session-list" class="session-list">
+                <!-- Session items magically appear here via JS -->
             </div>
-        </main>
+        </aside>
 
-        <footer class="input-area glass-footer">
-            <form id="chat-form">
-                <input type="text" id="user-input" placeholder="Ask anything about the document..." required autocomplete="off">
-                <button type="submit" id="send-btn">
-                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="22" y1="2" x2="11" y2="13"></line>
-                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                    </svg>
-                </button>
-            </form>
-        </footer>
+        <!-- Main Chat Panel -->
+        <div class="chat-area">
+            <header class="glass-header">
+                <h1>Regulify</h1>
+                <div class="header-actions">
+                    <button id="theme-toggle" class="secondary-btn" title="Toggle Theme">◑ Theme</button>
+                    <button id="clear-btn" class="secondary-btn" title="Clear Current Chat">Clear</button>
+                </div>
+            </header>
+
+            <main id="chat-container">
+                <div class="welcome-message">
+                    <h2>Welcome to Regulify RAG</h2>
+                    <p>Select a past chat from the left, or start typing to create a new one!</p>
+                </div>
+            </main>
+
+            <footer class="input-area glass-footer">
+                <form id="chat-form">
+                    <input type="text" id="user-input" placeholder="Ask anything about the document..." required
+                        autocomplete="off">
+                    <button type="submit" id="send-btn" title="Send message">
+                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </form>
+            </footer>
+        </div>
     </div>
     <!-- Markdown & Math rendering scripts -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
-    
+
     <script src="/static/app.js"></script>
 </body>
+
 </html>

@@ -26,12 +26,141 @@ body {
 }
 
 .app-container {
-    width: 100%;
-    max-width: 900px;
+    width: 100vw;
+    max-width: 100vw;
     height: 100vh;
+    display: flex;
+    flex-direction: row;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Light Theme Overrides */
+body.light-theme {
+    --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+    --glass-bg: rgba(255, 255, 255, 0.7);
+    --glass-border: rgba(0, 0, 0, 0.1);
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --ai-bubble: rgba(255, 255, 255, 0.9);
+}
+
+body.light-theme .sidebar {
+    background: rgba(255, 255, 255, 0.5);
+}
+
+body.light-theme .session-item {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+body.light-theme .session-item:hover {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+body.light-theme .bubble pre {
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+body.light-theme .bubble code {
+    background: rgba(0, 0, 0, 0.05);
+    color: #4f46e5;
+}
+
+body.light-theme .ai .bubble {
+    background: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+}
+
+/* Sidebar Layout */
+.sidebar {
+    width: 280px;
+    background: rgba(0, 0, 0, 0.2);
+    border-right: 1px solid var(--glass-border);
+    display: flex;
+    flex-direction: column;
+    z-index: 20;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    flex-shrink: 0;
+}
+
+.sidebar-header {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--glass-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.sidebar-header h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.icon-btn {
+    background: transparent;
+    border: 1px solid var(--glass-border);
+    color: var(--text-primary);
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: all 0.2s;
+}
+
+.icon-btn:hover {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.session-item {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: all 0.2s;
+}
+
+.session-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+}
+
+.session-item.active {
+    background: rgba(99, 102, 241, 0.2);
+    color: var(--text-primary);
+    border-left: 3px solid var(--primary-color);
+}
+
+/* Chat Area Main constraints */
+.chat-area {
+    flex: 1;
     display: flex;
     flex-direction: column;
     position: relative;
+    max-width: calc(100vw - 280px);
+    /* Fill remaining space without overflow */
 }
 
 .glass-header {
@@ -78,8 +207,16 @@ body {
     padding: 2rem;
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 1.5rem;
     scroll-behavior: smooth;
+}
+
+/* Add inner bound constraints to the chat interface so it's centered reading mode */
+.message,
+.welcome-message {
+    width: 100%;
+    max-width: 800px;
 }
 
 .welcome-message {
@@ -93,29 +230,29 @@ body {
     margin-bottom: 0.5rem;
 }
 
-/* Chat Bubbles */
-.message {
-    display: flex;
-    flex-direction: column;
-    max-width: 100%;
-    animation: fadeIn 0.3s ease;
-}
+/* --- Chat Bubbles --- */
 
+/* User messages: limited width, right aligned */
 .message.user {
     align-self: flex-end;
+    max-width: 75%;
 }
 
+/* AI messages: full width, left aligned */
 .message.ai {
     align-self: flex-start;
+    width: 100%;
+    max-width: 100%;
 }
 
 .bubble {
-    padding: 1rem 1.25rem;
-    border-radius: 16px;
-    line-height: 1.5;
-    font-size: 1rem;
+    padding: 0.875rem 1.25rem;
+    border-radius: 18px;
+    line-height: 1.65;
+    font-size: 0.95rem;
     overflow-x: auto;
     overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 /* Ensure wide math equations scroll horizontally instead of breaking the layout */
@@ -126,15 +263,19 @@ body {
 }
 
 .user .bubble {
-    background: var(--user-bubble);
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
     color: white;
     border-bottom-right-radius: 4px;
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+    align-self: flex-end;
 }
 
 .ai .bubble {
     background: transparent;
     border: none;
-    border-bottom-left-radius: 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0;
+    padding: 1rem 0;
 }
 
 .sources-container {
@@ -173,12 +314,16 @@ body {
     backdrop-filter: blur(12px);
     border-top: 1px solid var(--glass-border);
     padding: 1.5rem 2rem;
+    display: flex;
+    justify-content: center;
 }
 
 #chat-form {
     display: flex;
     gap: 1rem;
     position: relative;
+    width: 100%;
+    max-width: 800px;
 }
 
 #user-input {
@@ -226,10 +371,10 @@ body {
 }
 
 /* Animations */
-@keyframes fadeIn {
+@keyframes fadeInSlideUp {
     from {
         opacity: 0;
-        transform: translateY(10px);
+        transform: translateY(15px);
     }
 
     to {
@@ -238,32 +383,11 @@ body {
     }
 }
 
-.typing-indicator {
+.message {
     display: flex;
-    gap: 0.3rem;
-    padding: 1rem 1.5rem;
-    background: var(--ai-bubble);
-    border-radius: 16px;
-    border-bottom-left-radius: 4px;
-    align-self: flex-start;
-    width: fit-content;
-    display: none;
-}
-
-.typing-indicator span {
-    width: 6px;
-    height: 6px;
-    background-color: var(--text-secondary);
-    border-radius: 50%;
-    animation: typing 1.4s infinite ease-in-out both;
-}
-
-.typing-indicator span:nth-child(1) {
-    animation-delay: -0.32s;
-}
-
-.typing-indicator span:nth-child(2) {
-    animation-delay: -0.16s;
+    flex-direction: column;
+    max-width: 100%;
+    animation: fadeInSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes typing {
@@ -277,4 +401,122 @@ body {
     40% {
         transform: scale(1);
     }
+}
+
+/* Enhanced User Input Glow */
+#user-input:focus {
+    border-color: #818cf8;
+    box-shadow: 0 0 15px rgba(129, 140, 248, 0.3);
+    background: rgba(0, 0, 0, 0.4);
+}
+
+/* Glass Header Shadow */
+.glass-header {
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
+}
+
+/* Custom Scrollbar Styles for Dark Theme */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+/* Premium Typography for Markdown (Generated by AI) */
+.ai .bubble {
+    font-size: 0.95rem;
+    letter-spacing: 0.015em;
+    font-weight: 300;
+}
+
+.bubble h1,
+.bubble h2,
+.bubble h3 {
+    margin-top: 1.2rem;
+    margin-bottom: 0.6rem;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.bubble p {
+    margin-bottom: 0.8rem;
+}
+
+.bubble p:last-child {
+    margin-bottom: 0;
+}
+
+.bubble strong {
+    font-weight: 600;
+    color: #e2e8f0;
+}
+
+.bubble pre {
+    background: rgba(0, 0, 0, 0.4);
+    padding: 1.25rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 1.25rem 0;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.bubble code {
+    font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.85em;
+    color: #e2e8f0;
+}
+
+.bubble pre code {
+    background: transparent;
+    padding: 0;
+    color: #cbd5e1;
+}
+
+.bubble table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.25rem 0;
+}
+
+.bubble th,
+.bubble td {
+    border: 1px solid var(--glass-border);
+    padding: 0.75rem;
+    text-align: left;
+}
+
+.bubble th {
+    background: rgba(255, 255, 255, 0.08);
+    font-weight: 500;
+}
+
+.bubble blockquote {
+    border-left: 3px solid var(--primary-color);
+    background: rgba(99, 102, 241, 0.05);
+    padding: 0.75rem 1.25rem;
+    margin: 1.25rem 0;
+    color: var(--text-secondary);
+    font-style: italic;
+    border-radius: 0 8px 8px 0;
+}
+
+.bubble ul,
+.bubble ol {
+    margin: 0.75rem 0 0.75rem 1.5rem;
 }

@@ -87,6 +87,26 @@ def _format_sources(docs: List[Document]) -> List[Dict[str, Any]]:
     return sources
 
 
+_CONVERSATIONAL_PATTERNS = {
+    "hi", "hello", "hey", "howdy", "greetings",
+    "how are you", "how are you doing", "how's it going",
+    "good morning", "good afternoon", "good evening", "good night",
+    "thanks", "thank you", "cheers", "bye", "goodbye", "see you",
+    "ok", "okay", "sure", "great", "awesome", "cool", "nice",
+    "what's up", "sup", "yo",
+}
+
+def _is_conversational(question: str) -> bool:
+    """Return True if the question looks like a short greeting or chit-chat."""
+    q = question.strip().lower().rstrip("?!.,")
+    if q in _CONVERSATIONAL_PATTERNS:
+        return True
+    # Short sentences (≤ 4 words) are treated as conversational
+    if len(q.split()) <= 4 and not any(kw in q for kw in ["what", "how", "why", "when", "where", "who", "explain", "define", "describe"]):
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # RAGPipeline
 # ---------------------------------------------------------------------------
@@ -118,14 +138,13 @@ class RAGPipeline:
         )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system",
-             "You are a helpful and concise assistant answering questions based only on the "
-             "provided document context.\n"
-             "Answer the question directly in your own words. Do NOT simply copy/paste the raw context blocks.\n"
-             "If the user's question can be answered using the provided context, answer it naturally.\n"
-             "If the user's question is entirely unrelated to the provided document (e.g., 'Hello', 'What is your name?'), "
-             "you must answer it conversationally, BUT you MUST begin your response exactly with the prefix 'NO_CONTEXT_USED:'.\n"
-             "Do NOT append a list of references, excerpts, or sources at the end of your answer.\n\n"
-             "Context:\n{context}"),
+             "You are a helpful assistant for Regulify, an AI-powered regulatory document tool.\n"
+             "You have two modes of answering:\n"
+             "1. If the question is related to the document context below, answer it directly from the context.\n"
+             "2. If the question is a general knowledge, conversational, or factual question (e.g., 'What is the capital of India?', 'Hello', greetings), answer it naturally and helpfully from your own knowledge. For these cases, begin your response with the prefix 'NO_CONTEXT_USED:'.\n"
+             "3. If the question is pure gibberish, random characters, or completely incoherent, politely ask the user to rephrase and begin your response with 'NO_CONTEXT_USED:'.\n"
+             "Always be polite, clear, and concise. Do NOT append source lists or excerpts at the end.\n\n"
+             "Document Context:\n{context}"),
             MessagesPlaceholder("chat_history"),
             ("human", "{input}"),
         ])
@@ -143,8 +162,29 @@ class RAGPipeline:
         history: List[BaseMessage] = _chat_histories.setdefault(session_id, [])
         logger.info("[session=%s] Query: %s (history=%d)", session_id, question, len(history))
 
-        # Retrieve relevant chunks
-        docs: List[Document] = self._retriever.invoke(question)
+        # Conversational bypass: skip distance filter for greetings/chit-chat
+        if _is_conversational(question):
+            logger.info("[session=%s] Conversational query detected, bypassing filter.", session_id)
+            chain = self._prompt | self._llm | StrOutputParser()
+            answer = chain.invoke({"input": question, "chat_history": history, "context": ""}).strip()
+            if answer.startswith("NO_CONTEXT_USED:"):
+                answer = answer.replace("NO_CONTEXT_USED:", "", 1).strip()
+            history.append(HumanMessage(content=question))
+            history.append(AIMessage(content=answer))
+            return {"answer": answer, "sources": []}
+
+        # Retrieve relevant chunks with score (L2 distance)
+        retrieved = self._vectorstore.similarity_search_with_score(question, k=TOP_K)
+        
+        # Pre-retrieval filtering: reject ONLY genuine gibberish (very high distance threshold)
+        if not retrieved or retrieved[0][1] > 1.6:
+            logger.info("Gibberish/no-match detected! Min distance: %f", retrieved[0][1] if retrieved else -1)
+            fallback = "I didn't quite catch that! Could you rephrase? I can answer questions about the Regulify document, or general knowledge questions too."
+            history.append(HumanMessage(content=question))
+            history.append(AIMessage(content=fallback))
+            return {"answer": fallback, "sources": []}
+
+        docs: List[Document] = [doc for doc, _ in retrieved]
         context: str = _format_docs(docs)
 
         # Build and invoke the chain
@@ -175,8 +215,37 @@ class RAGPipeline:
         history: List[BaseMessage] = _chat_histories.setdefault(session_id, [])
         logger.info("[session=%s] Stream Query: %s (history=%d)", session_id, question, len(history))
 
-        # Retrieve relevant chunks
-        docs: List[Document] = self._retriever.invoke(question)
+        # Conversational bypass: skip distance filter for greetings/chit-chat
+        if _is_conversational(question):
+            logger.info("[session=%s] Conversational stream query, bypassing filter.", session_id)
+            yield {"type": "sources", "sources": []}
+            chain = self._prompt | self._llm | StrOutputParser()
+            full_answer = ""
+            for chunk in chain.stream({"input": question, "chat_history": history, "context": ""}):
+                full_answer += chunk
+                # Strip prefix if model adds it
+                text_to_yield = chunk
+                if full_answer.startswith("NO_CONTEXT_USED:") and len(full_answer) <= len("NO_CONTEXT_USED:"):
+                    text_to_yield = ""
+                yield {"type": "chunk", "text": text_to_yield}
+            full_answer = full_answer.replace("NO_CONTEXT_USED:", "", 1).strip()
+            history.append(HumanMessage(content=question))
+            history.append(AIMessage(content=full_answer))
+            return
+
+        # Retrieve relevant chunks with score
+        retrieved = self._vectorstore.similarity_search_with_score(question, k=TOP_K)
+
+        if not retrieved or retrieved[0][1] > 1.6:
+            logger.info("Gibberish/no-match detected! Min distance: %f", retrieved[0][1] if retrieved else -1)
+            fallback = "I didn't quite catch that! Could you rephrase? I can answer questions about the Regulify document, or general knowledge questions too."
+            yield {"type": "sources", "sources": []}
+            yield {"type": "chunk", "text": fallback}
+            history.append(HumanMessage(content=question))
+            history.append(AIMessage(content=fallback))
+            return
+
+        docs: List[Document] = [doc for doc, _ in retrieved]
         context: str = _format_docs(docs)
 
         # Build and stream the chain
@@ -211,6 +280,15 @@ class RAGPipeline:
         """Clear chat history for a session."""
         _chat_histories.pop(session_id, None)
         logger.info("History cleared for session '%s'.", session_id)
+
+    def get_history(self, session_id: str = "default") -> List[Dict[str, str]]:
+        """Return the chat history as a list of dictionaries for the UI."""
+        history = _chat_histories.get(session_id, [])
+        formatted = []
+        for msg in history:
+            sender = "user" if isinstance(msg, HumanMessage) else "ai"
+            formatted.append({"sender": sender, "text": msg.content})
+        return formatted
 
     @staticmethod
     def get_session_ids() -> List[str]:

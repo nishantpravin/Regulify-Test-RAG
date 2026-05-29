@@ -4,6 +4,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const userInput = document.getElementById('user-input');
     const sendBtn = document.getElementById('send-btn');
     const clearBtn = document.getElementById('clear-btn');
+    const themeToggleBtn = document.getElementById('theme-toggle');
+    const sessionList = document.getElementById('session-list');
+    const newChatBtn = document.getElementById('new-chat-btn');
+
+    // Theme Management
+    let currentTheme = localStorage.getItem('theme') || 'dark';
+    if (currentTheme === 'light') document.body.classList.add('light-theme');
+    themeToggleBtn.addEventListener('click', () => {
+        currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('theme', currentTheme);
+        if (currentTheme === 'light') document.body.classList.add('light-theme');
+        else document.body.classList.remove('light-theme');
+    });
 
     // Generate a permanent session ID for this browser tab
     let sessionId = sessionStorage.getItem('sessionId');
@@ -221,6 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
             appendMessage('Network error. Is the server running?', 'ai');
         } finally {
             setTyping(false);
+            if (typeof loadSessions === 'function') loadSessions();
         }
     });
 
@@ -229,15 +243,64 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             await fetch(`/history/${sessionId}`, { method: 'DELETE' });
+            loadHistory(sessionId); // Resets the UI
         } catch (e) {
             console.error(e);
         }
-
-        chatContainer.innerHTML = `
-            <div class="welcome-message">
-                <h2>Welcome to Regulify RAG</h2>
-                <p>History cleared. Ask a new question.</p>
-            </div>
-        `;
     });
+
+    const loadSessions = async () => {
+        try {
+            const res = await fetch('/sessions');
+            if (!res.ok) return;
+            const data = await res.json();
+            sessionList.innerHTML = '';
+
+            // Display most recent (bottom) first in sidebar
+            [...data.sessions].reverse().forEach(sid => {
+                const item = document.createElement('div');
+                item.className = 'session-item';
+                if (sid === sessionId) item.classList.add('active');
+                item.textContent = sid;
+                item.addEventListener('click', () => loadHistory(sid));
+                sessionList.appendChild(item);
+            });
+        } catch (e) { console.error('Sessions fetch error:', e); }
+    };
+
+    const loadHistory = async (sid) => {
+        sessionId = sid;
+        sessionStorage.setItem('sessionId', sid);
+        loadSessions(); // Trigger active highlight re-render
+
+        try {
+            const res = await fetch(`/history/${sid}`);
+            if (!res.ok) return;
+            const data = await res.json();
+
+            chatContainer.innerHTML = '';
+            if (!data.history || data.history.length === 0) {
+                chatContainer.innerHTML = `
+                    <div class="welcome-message">
+                        <h2>Welcome to Regulify RAG</h2>
+                        <p>Select a past chat from the left, or start typing to create a new one!</p>
+                    </div>
+                `;
+                return;
+            }
+
+            data.history.forEach(msg => {
+                appendMessage(msg.text, msg.sender);
+            });
+        } catch (e) { console.error('History fetch error:', e); }
+    };
+
+    newChatBtn.addEventListener('click', () => {
+        sessionId = 'session_' + Math.random().toString(36).substring(2, 10);
+        sessionStorage.setItem('sessionId', sessionId);
+        loadHistory(sessionId);
+    });
+
+    // Initialize App
+    loadHistory(sessionId);
 });

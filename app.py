@@ -189,10 +189,6 @@ async def query_document_stream(request: QueryRequest) -> StreamingResponse:
     status_code=status.HTTP_200_OK,
 )
 async def clear_history(session_id: str) -> JSONResponse:
-    """Delete the chat history for the specified session_id.
-
-    Use this to start a fresh conversation without remembering previous turns.
-    """
     try:
         pipeline: RAGPipeline = get_pipeline()
         pipeline.clear_history(session_id)
@@ -205,6 +201,30 @@ async def clear_history(session_id: str) -> JSONResponse:
         content={"message": f"History cleared for session '{session_id}'."}
     )
 
+@app.get(
+    "/sessions",
+    summary="List all active session IDs",
+    status_code=status.HTTP_200_OK,
+)
+async def list_sessions() -> JSONResponse:
+    try:
+        pipeline: RAGPipeline = get_pipeline()
+        return JSONResponse(content={"sessions": pipeline.get_session_ids()})
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+@app.get(
+    "/history/{session_id}",
+    summary="Get chat history for a specific session",
+    status_code=status.HTTP_200_OK,
+)
+async def get_history(session_id: str) -> JSONResponse:
+    try:
+        pipeline: RAGPipeline = get_pipeline()
+        history = pipeline.get_history(session_id)
+        return JSONResponse(content={"history": history})
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 @app.get(
     "/health",
