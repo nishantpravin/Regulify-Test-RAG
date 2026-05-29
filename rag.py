@@ -194,6 +194,7 @@ class RAGPipeline:
                 answer = answer.replace("NO_CONTEXT_USED:", "", 1).strip()
             self._save_message(session_id, "user", question)
             self._save_message(session_id, "ai", answer)
+            self._maybe_generate_title(session_id)
             return {"answer": answer, "sources": []}
 
         # Fetch associated doc_id for this session
@@ -211,13 +212,17 @@ class RAGPipeline:
             filter={"doc_id": doc_id}
         )
         
-        # Pre-retrieval filtering: reject ONLY genuine gibberish (very high distance threshold)
+        # High distance threshold means out-of-context or general knowledge query
         if not retrieved or retrieved[0][1] > 1.6:
-            logger.info("Gibberish/no-match detected! Min distance: %f", retrieved[0][1] if retrieved else -1)
-            fallback = "I didn't quite catch that! Could you rephrase? I can answer questions about the Regulify document, or general knowledge questions too."
+            logger.info("High distance detected! Min distance: %f. Reverting to general knowledge.", retrieved[0][1] if retrieved else -1)
+            chain = self._prompt | self._llm | StrOutputParser()
+            answer = chain.invoke({"input": question, "chat_history": history, "context": ""}).strip()
+            if answer.startswith("NO_CONTEXT_USED:"):
+                answer = answer.replace("NO_CONTEXT_USED:", "", 1).strip()
             self._save_message(session_id, "user", question)
-            self._save_message(session_id, "ai", fallback)
-            return {"answer": fallback, "sources": []}
+            self._save_message(session_id, "ai", answer)
+            self._maybe_generate_title(session_id)
+            return {"answer": answer, "sources": []}
 
         docs: List[Document] = [doc for doc, _ in retrieved]
         context: str = _format_docs(docs)
@@ -268,6 +273,7 @@ class RAGPipeline:
             full_answer = full_answer.replace("NO_CONTEXT_USED:", "", 1).strip()
             self._save_message(session_id, "user", question)
             self._save_message(session_id, "ai", full_answer)
+            self._maybe_generate_title(session_id)
             return
 
         # Fetch associated doc_id for this session
@@ -286,12 +292,20 @@ class RAGPipeline:
         )
 
         if not retrieved or retrieved[0][1] > 1.6:
-            logger.info("Gibberish/no-match detected! Min distance: %f", retrieved[0][1] if retrieved else -1)
-            fallback = "I didn't quite catch that! Could you rephrase? I can answer questions about the Regulify document, or general knowledge questions too."
+            logger.info("High distance detected! Min distance: %f. Reverting to general knowledge.", retrieved[0][1] if retrieved else -1)
             yield {"type": "sources", "sources": []}
-            yield {"type": "chunk", "text": fallback}
+            chain = self._prompt | self._llm | StrOutputParser()
+            full_answer = ""
+            for chunk in chain.stream({"input": question, "chat_history": history, "context": ""}):
+                full_answer += chunk
+                text_to_yield = chunk
+                if full_answer.startswith("NO_CONTEXT_USED:") and len(full_answer) <= len("NO_CONTEXT_USED:"):
+                    text_to_yield = ""
+                yield {"type": "chunk", "text": text_to_yield}
+            full_answer = full_answer.replace("NO_CONTEXT_USED:", "", 1).strip()
             self._save_message(session_id, "user", question)
-            self._save_message(session_id, "ai", fallback)
+            self._save_message(session_id, "ai", full_answer)
+            self._maybe_generate_title(session_id)
             return
 
         docs: List[Document] = [doc for doc, _ in retrieved]
